@@ -341,11 +341,11 @@ class Scsp21Reader:
 
     def _parse_region(self, name: str, path: str) -> OrderedDict[str, Any]:
         x, y, scale_x, scale_y, rotation = (self.f32() for _ in range(5))
-        self.skip(8)
+        width = self.f32()
+        height = self.f32()
         r, g, b, a = (self.f32() for _ in range(4))
         self.skip(8)
-        width = self.i32()
-        height = self.i32()
+        self.skip(8)  # atlas-pixel i32 width/height (often matches atlas size)
         self.skip(72)
         att: OrderedDict[str, Any] = OrderedDict()
         att["type"] = "region"
@@ -359,15 +359,17 @@ class Scsp21Reader:
         att["scaleY"] = _round_compact(scale_y, 5)
         if abs(rotation) > 1e-3:
             att["rotation"] = _round_compact(rotation, 4)
-        att["width"] = float(width)
-        att["height"] = float(height)
+        w = _round_compact(width, 2)
+        h = _round_compact(height, 2)
+        att["width"] = w
+        att["height"] = h
         color = _color_hex(r, g, b, a)
         if color != "FFFFFFFF":
             att["color"] = color
-        att["regionWidth"] = float(width)
-        att["regionHeight"] = float(height)
-        att["regionOriginalWidth"] = float(width)
-        att["regionOriginalHeight"] = float(height)
+        att["regionWidth"] = w
+        att["regionHeight"] = h
+        att["regionOriginalWidth"] = w
+        att["regionOriginalHeight"] = h
         return att
 
     def _parse_bbox(self, name: str, path: str) -> OrderedDict[str, Any]:

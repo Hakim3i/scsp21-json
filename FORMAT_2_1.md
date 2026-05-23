@@ -180,12 +180,19 @@ begins with a 20-byte common header followed by a type-specific body.
 
 ```
 f32 x, y, scaleX, scaleY, rotation
+f32 width, height                 # skeleton-space display size (emit to JSON)
 8 bytes unknown
 f32 color.r, g, b, a
 8 bytes unknown
-i32 width, height
+i32 atlas_width, atlas_height     # atlas-pixel size (duplicate of atlas page entry)
 72 bytes unknown
 ```
+
+On older combat exports the ``f32`` pair is ~1.5× the trailing ``i32`` pair
+(e.g. achates ``Head_C_N``: 58×58 float vs 38×38 int matching the atlas page).
+The converter emits the ``f32`` display dimensions; using the ``i32`` atlas
+pixels instead makes region slots (head, boots, …) render smaller than
+co-located mesh/skinnedmesh body parts.
 
 ### Type 1 (boundingbox) sub-record
 
