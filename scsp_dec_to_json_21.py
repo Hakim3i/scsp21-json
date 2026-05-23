@@ -27,6 +27,7 @@ from _scsp21_reader import SCSP_MAGIC, Scsp21Reader, VERSION_TAGGED, detect_2_1
 
 VERSION_2_1 = VERSION_TAGGED
 VERSION_3_8 = 0x00007531
+SETUP_ANIMATION = "setup"
 
 
 def load_scsp_bytes(path: str | os.PathLike[str]) -> bytes:
@@ -51,7 +52,8 @@ def convert(
     backward compatibility with the previous heuristic parser but is no
     longer needed (the new reader is deterministic). Pass
     ``include_animations=False`` to emit the skeleton/bones/slots/skins/events
-    only (animations dict is still present but empty, which Spine 2.1 accepts).
+    only. A minimal ``setup`` animation entry is still written so Spine
+    runtimes (and SpineViewerCLI) can render the bind pose.
     """
     del atlas_path
     reader = Scsp21Reader(data)
@@ -68,6 +70,7 @@ def convert(
             animations = OrderedDict()
     else:
         animations = OrderedDict()
+        animations[SETUP_ANIMATION] = OrderedDict()
 
     out: OrderedDict[str, Any] = OrderedDict()
     out["skeleton"] = skeleton

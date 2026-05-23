@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import re
+import struct
 from collections import OrderedDict
 from typing import Any
 
@@ -36,6 +38,120 @@ CURVE_LINEAR = 0
 CURVE_STEPPED = 1
 CURVE_BEZIER = 2
 CURVE_NONE_SENTINELS = (0xFFFE, 0xFFFF)
+_ANIM_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_MAX_TIMELINE_ITEMS = 2000
+
+
+def _looks_like_animation_header(reader: Scsp21Reader, pos: int, pos_end: int) -> bool:
+    """True when ``pos`` looks like ``name_ptr / pad / item_count / first mode``."""
+    if pos + 16 > pos_end:
+        return False
+    name_ptr = struct.unpack_from("<I", reader.data, pos)[0]
+    if name_ptr == 0:
+        item_count = struct.unpack_from("<I", reader.data, pos + 8)[0]
+        return item_count == 0
+    if name_ptr >= reader.strings_size:
+        return False
+    name = reader.get_string(name_ptr)
+    if not name or len(name) > 48 or not _ANIM_NAME_RE.match(name):
+        return False
+    if reader.skeleton_hash and name == reader.skeleton_hash:
+        return False
+    item_count = struct.unpack_from("<I", reader.data, pos + 8)[0]
+    if not (1 <= item_count <= _MAX_TIMELINE_ITEMS):
+        return False
+    if pos + 12 + item_count * 8 > pos_end:
+        return False
+    mode = struct.unpack_from("<I", reader.data, pos + 12)[0]
+    return mode <= TIMELINE_FLIPY
+
+
+def _quick_validate_first_timeline(
+    reader: Scsp21Reader,
+    pos: int,
+    pos_end: int,
+    bones: list[OrderedDict[str, Any]],
+    slots: list[OrderedDict[str, Any]],
+) -> bool:
+    """Cheap check that the first timeline entry after a header looks sane."""
+    if pos + 20 > pos_end:
+        return False
+    mode = struct.unpack_from("<I", reader.data, pos + 12)[0]
+    if mode > TIMELINE_FLIPY:
+        return False
+    if mode in (TIMELINE_SCALE, TIMELINE_ROTATE, TIMELINE_TRANSLATE, TIMELINE_FLIPX, TIMELINE_FLIPY):
+        bone_idx = struct.unpack_from("<I", reader.data, pos + 16)[0]
+        return 0 <= bone_idx < len(bones)
+    if mode in (TIMELINE_COLOR, TIMELINE_ATTACHMENT):
+        slot_idx = struct.unpack_from("<I", reader.data, pos + 16)[0]
+        return 0 <= slot_idx < len(slots)
+    if mode == TIMELINE_FFD:
+        frame_count = struct.unpack_from("<I", reader.data, pos + 16)[0]
+        return 0 < frame_count <= 10000
+    return True
+
+
+def _parse_animation_at(
+    reader: Scsp21Reader,
+    pos: int,
+    pos_end: int,
+    bones: list[OrderedDict[str, Any]],
+    slots: list[OrderedDict[str, Any]],
+    ffd_index: list[dict[str, Any]],
+) -> tuple[str, OrderedDict[str, Any], int] | None:
+    """Try to parse one animation at ``pos``; return ``(name, anim, end_pos)``."""
+    saved_pos = reader.pos
+    if not _looks_like_animation_header(reader, pos, pos_end):
+        return None
+    name_ptr = struct.unpack_from("<I", reader.data, pos)[0]
+    item_count = struct.unpack_from("<I", reader.data, pos + 8)[0]
+    if name_ptr == 0 and item_count == 0:
+        return "", OrderedDict(), pos + 12
+    if not _quick_validate_first_timeline(reader, pos, pos_end, bones, slots):
+        reader.pos = saved_pos
+        return None
+    anim_name = reader.get_string(name_ptr)
+    reader.pos = pos + 12
+    anim: OrderedDict[str, Any] = OrderedDict()
+    try:
+        for _ in range(item_count):
+            if reader.pos + 4 > pos_end:
+                raise ValueError("truncated animation timeline")
+            mode = reader.u32()
+            if mode > TIMELINE_FLIPY:
+                raise ValueError(f"unsupported timeline mode {mode}")
+            _read_timeline(reader, mode, bones, slots, ffd_index, anim)
+    except (ValueError, struct.error):
+        reader.pos = saved_pos
+        return None
+    if not anim_name or not anim:
+        reader.pos = saved_pos
+        return None
+    return anim_name, anim, reader.pos
+
+
+def _find_next_animation(
+    reader: Scsp21Reader,
+    start: int,
+    pos_end: int,
+    bones: list[OrderedDict[str, Any]],
+    slots: list[OrderedDict[str, Any]],
+    ffd_index: list[dict[str, Any]],
+    *,
+    scan_limit: int = 128,
+) -> tuple[str, OrderedDict[str, Any], int] | None:
+    """Scan forward from ``start`` for the next valid animation or empty sentinel."""
+    scan_end = min(pos_end - 12, start + scan_limit)
+    pos = start
+    while pos <= scan_end:
+        if _looks_like_animation_header(reader, pos, pos_end):
+            parsed = _parse_animation_at(
+                reader, pos, pos_end, bones, slots, ffd_index
+            )
+            if parsed is not None:
+                return parsed
+        pos += 1
+    return None
 
 
 def read_animations(
@@ -51,33 +167,17 @@ def read_animations(
     if reader.pos >= pos_end:
         return animations
     reader.skip(4)  # leading sentinel before first animation
-    for _ in range(reader.animations_count):
-        if reader.pos >= pos_end:
+    while len(animations) < reader.animations_count and reader.pos < pos_end:
+        scan_limit = pos_end - reader.pos if not animations else 256
+        parsed = _find_next_animation(
+            reader, reader.pos, pos_end, bones, slots, ffd_index, scan_limit=scan_limit
+        )
+        if parsed is None:
             break
-        anim_name = reader.get_string(reader.u32())
-        reader.skip(4)
-        item_count = reader.u32()
-        # Tagged combat units store full-skeleton timelines first, then an empty
-        # name/item sentinel, then per-bone clip blobs (not Spine JSON timelines).
-        if not anim_name and item_count == 0:
-            break
-        if anim_name and anim_name == reader.skeleton_hash:
-            break
-        if item_count > 2000:
-            break
-        anim: OrderedDict[str, Any] = OrderedDict()
-        for _ in range(item_count):
-            if reader.pos + 4 > pos_end:
-                break
-            mode = reader.u32()
-            if mode > TIMELINE_FLIPY:
-                reader.pos -= 4
-                break
-            try:
-                _read_timeline(reader, mode, bones, slots, ffd_index, anim)
-            except ValueError:
-                reader.pos -= 4
-                break
+        anim_name, anim, end_pos = parsed
+        reader.pos = end_pos
+        if not anim_name:
+            continue
         animations[anim_name] = anim
     return animations
 

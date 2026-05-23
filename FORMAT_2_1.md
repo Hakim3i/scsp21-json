@@ -270,6 +270,27 @@ u32 item_count                # total number of timelines in this animation
 Then `item_count` timeline items follow. Each timeline starts with a
 `u32 timeline_mode`:
 
+**Combat / multi-block layout:** portrait files use one contiguous stream.
+Combat models (and some NPCs) store animations in one or more groups separated
+by an **empty sentinel** (`name_ptr = 0`, `item_count = 0`, 12 bytes total).
+After the sentinel the same header/timeline format resumes — this is not a
+different binary encoding, only a logical split in the stream.
+
+Between consecutive animation records the file may insert **padding** that is
+not a multiple of four bytes (gaps of ~20–30 bytes are typical; up to ~100
+bytes observed). Headers are therefore not guaranteed to sit on a 4-byte
+boundary relative to the previous record end. The parser resyncs by scanning
+forward (up to 256 bytes) for the next valid header.
+
+Animation names in game data use **lowercase** identifiers (`idle`, `skill1`,
+`knock_down`, …). The converter rejects uppercase names when resyncing so
+bone/slot attachment strings and skeleton-hash metadata are not mistaken for
+animation headers.
+
+After the last animation, a short **trailing padding** block (often 10–110
+bytes, sometimes all zeros/`0xFF` fill) may remain before `8 + data_size`.
+This padding is not another animation record.
+
 | Mode | Name        | Spec |
 |------|-------------|------|
 | 0    | scale       | bone xy timeline |
@@ -374,8 +395,11 @@ bezier curve in `idle`.
 The reader at `_scsp21_reader.py` + animation parser at `_scsp21_anim.py`:
 
 - Loads all 206 SCSP 2.1.27 portraits in `e7data/portrait/` without errors.
-- Stops at exactly `8 + data_size` after the last animation timeline (no
-  leftover bytes, no over-read).
+- Parses combat model animations including post-sentinel groups (e.g. wyvern
+  21/21, achates 21/21) with block-2 combat clips (`skill1`, `knock_down`,
+  `run`, …).
+- Stops at or near `8 + data_size` after the last animation timeline; a
+  small trailing padding block (≤ ~110 bytes) may remain on some combat files.
 - Produces bone counts, slot counts, and per-bone transform values that match
   the e7herder reference for every portrait where the file has not been
   re-exported by the game team. Most divergences are `+1` bone (game added a
