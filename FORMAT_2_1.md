@@ -380,6 +380,8 @@ The reader at `_scsp21_reader.py` + animation parser at `_scsp21_anim.py`:
   the e7herder reference for every portrait where the file has not been
   re-exported by the game team. Most divergences are `+1` bone (game added a
   helper bone in a patch) or shifted face-bone geometry.
+- See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for documented visual mismatches that
+  are not converter bugs.
 
 ## Anchors in EpicSeven.exe (Ghidra)
 

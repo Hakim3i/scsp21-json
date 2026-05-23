@@ -58,6 +58,7 @@ python lz4_processor.py path/to/unit.scsp
 | `_scsp21_anim.py` | Animation timeline parser |
 | `lz4_processor.py` | Epic Seven SCSP LZ4 stream decompressor (same format as scsp38-json) |
 | `FORMAT_2_1.md` | Reverse-engineered 2.1 binary notes |
+| `KNOWN_ISSUES.md` | Known visual / reference mismatches |
 
 ## Python API
 

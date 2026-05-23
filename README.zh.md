@@ -58,6 +58,7 @@ python lz4_processor.py path/to/unit.scsp
 | `_scsp21_anim.py` | 动画时间轴解析 |
 | `lz4_processor.py` | Epic Seven SCSP 的 LZ4 流解压（与 scsp38-json 相同格式） |
 | `FORMAT_2_1.md` | 2.1 二进制布局笔记 |
+| `KNOWN_ISSUES.md` | 已知视觉 / 参考数据不匹配 |
 
 ## Python API
 
